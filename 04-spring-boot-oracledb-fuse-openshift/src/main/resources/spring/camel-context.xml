@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="        http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd        http://camel.apache.org/schema/spring      https://camel.apache.org/schema/spring/camel-spring.xsd">
+    <bean class="org.mycompany.SQLProcessor" id="SQLProcessor" scope="prototype"/>
+    <bean class="org.mycompany.clob2str" id="clob2str" scope="singleton"/>
+    <camelContext id="camel" xmlns="http://camel.apache.org/schema/spring">
+        <restConfiguration bindingMode="auto" component="netty4-http"
+            contextPath="/camel" host="localhost" port="8081">
+            <dataFormatProperty key="prettyPrint" value="true"/>
+        </restConfiguration>
+        <rest consumes="*" id="api-route" path="/api" produces="application/xml">
+            <get id="get" uri="/in">
+                <to uri="direct:proccall"/>
+            </get>
+        </rest>
+        <route id="restful-oracledb">
+            <from id="_from1" uri="direct:proccall"/>
+            <setHeader headerName="username" id="_setHeader1">
+                <simple>TESTUSER</simple>
+            </setHeader>
+            <log id="_log1" message=">>> ${header.test}"/>
+            <to id="_to1" uri="sql-stored:get_tables('p_username' VARCHAR ${headers.username},OUT CLOB result_clob)?dataSource=#myDataSource"/>
+            <transform id="_transform1">
+                <simple>${body['result_clob']}</simple>
+            </transform>
+            <process id="_process1" ref="clob2str"/>
+        </route>
+        <route id="fileSplit">
+            <from id="_from2" uri="file:src/inbox?delete=true&amp;initialDelay=5000&amp;delay=8000"/>
+            <split id="_split1" parallelProcessing="true" streaming="true">
+                <tokenize token="\n"/>
+                <to id="todb" uri="direct:file2db"/>
+            </split>
+        </route>
+        <route id="file2db">
+            <from id="_to3" uri="direct:file2db"/>
+            <log id="_log3" message=">>> ${body}"/>
+            <process id="_process2" ref="SQLProcessor"/>
+            <to id="_to2" uri="jdbc:myDataSource"/>
+            <log id="_log2" message="record inserted..."/>
+        </route>
+    </camelContext>
+</beans>

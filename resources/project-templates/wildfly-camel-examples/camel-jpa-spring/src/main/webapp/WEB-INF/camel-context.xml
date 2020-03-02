@@ -1,0 +1,98 @@
+<!--
+  #%L
+  Wildfly Camel :: Example :: Camel JPA Spring
+  %%
+  Copyright (C) 2013 - 2017 RedHat
+  %%
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+  #L%
+  -->
+<beans xmlns="http://www.springframework.org/schema/beans"
+       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xmlns:jee="http://www.springframework.org/schema/jee"
+       xmlns:util="http://www.springframework.org/schema/util"
+       xsi:schemaLocation="http://www.springframework.org/schema/beans
+                           http://www.springframework.org/schema/beans/spring-beans.xsd
+                           http://www.springframework.org/schema/jee
+                           http://www.springframework.org/schema/jee/spring-jee.xsd
+                           http://www.springframework.org/schema/util
+                           http://www.springframework.org/schema/util/spring-util.xsd
+                           http://camel.apache.org/schema/spring
+                           http://camel.apache.org/schema/spring/camel-spring.xsd">
+
+    <jee:jndi-lookup id="transactionManager" jndi-name="java:/TransactionManager"/>
+
+    <bean id="jtaTransactionManager" class="org.springframework.transaction.jta.JtaTransactionManager">
+        <property name="transactionManager" ref="transactionManager" />
+    </bean>
+
+    <bean id="entityManagerFactory" class="org.springframework.orm.jpa.LocalContainerEntityManagerFactoryBean">
+        <property name="persistenceUnitName" value="camel"/>
+    </bean>
+
+    <bean id="jpa" class="org.apache.camel.component.jpa.JpaComponent">
+        <property name="entityManagerFactory" ref="entityManagerFactory"/>
+        <property name="transactionManager" ref="jtaTransactionManager" />
+    </bean>
+
+    <bean id="orderService" class="org.wildfly.camel.examples.jpa.service.OrderService" />
+
+    <bean id="jpaResultProcessor" class="org.wildfly.camel.examples.jpa.processor.JpaResultProcessor" />
+
+    <bean id="orderProcessedProcessor" class="org.wildfly.camel.examples.jpa.processor.OrderProcessedProcessor" />
+
+    <!-- Used to define query paramters in queries -->
+    <util:map id="queryParameters" key-type="java.lang.String" value-type="java.lang.Object">
+        <entry key="id" value="${header.id}"/>
+    </util:map>
+
+    <camelContext xmlns="http://camel.apache.org/schema/spring" id="jpa-spring-camel-context">
+
+        <!-- Defines the REST DSL for querying order information -->
+        <restConfiguration component="undertow"
+                           contextPath="/rest/api"
+                           bindingMode="json" />
+
+        <rest path="/books">
+            <get uri="/">
+                <route>
+                    <to uri="jpa:org.wildfly.camel.examples.jpa.model.Order?nativeQuery=select distinct description from orders" />
+                </route>
+            </get>
+            <get uri="order/{id}">
+                <route>
+                    <to uri="jpa:org.wildfly.camel.examples.jpa.model.Order?consumeDelete=false&amp;parameters=#queryParameters&amp;nativeQuery=select * from orders where id = :id" />
+                    <process ref="jpaResultProcessor" />
+                </route>
+            </get>
+        </rest>
+
+        <!-- Route to generate orders and persist them to the database -->
+        <route id="timerToJpaRoute">
+            <from id="routeTimer" uri="timer:new-order?delay=0s&amp;period=10s" />
+            <bean id="orderGenerator" ref="orderService" method="generateOrder" />
+            <to id="jpaProducer1" uri="jpa:org.wildfly.camel.examples.jpa.model.Order" />
+            <log id="logInsert" message="Inserted new order ${body.id}" />
+        </route>
+
+        <!-- A second route polls the database for new orders and processes them -->
+        <route id="jpaToJpaRoute">
+            <from id="jpaConsumer" uri="jpa:org.wildfly.camel.examples.jpa.model.Order?consumeDelete=false
+                &amp;transacted=true&amp;joinTransaction=true&amp;namedQuery=pendingOrders" />
+            <process id="processor" ref="orderProcessedProcessor" />
+            <to id="jpaProducer2" uri="jpa:org.wildfly.camel.examples.jpa.model.Order" />
+            <log id="logProcessed" message="Processed order #id ${body.id} with ${body.amount} copies of the «${body.description}» book" />
+        </route>
+
+    </camelContext>
+</beans>

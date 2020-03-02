@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE order>
+<order>
+    <productName>Wireless Mouse</productName>
+    <productSku>54321</productSku>
+    <quantity>12</quantity>
+</order>
